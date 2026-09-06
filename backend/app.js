@@ -7,12 +7,16 @@ const { Issuer, generators } = require("openid-client");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const {
   DynamoDBDocumentClient,
-  PutCommand,
+  UpdateCommand,
 } = require("@aws-sdk/lib-dynamodb");
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
+const USERS_TABLE =
+  process.env.DYNAMODB_USERS_TABLE || "SWENG861Users";
+const AWS_REGION =
+  process.env.AWS_REGION || "us-east-2";
 
 // --------------------------------------------------
 // Middleware
@@ -25,18 +29,17 @@ app.use(
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: false, // localhost only
+    },
   })
 );
 
 // --------------------------------------------------
 // DynamoDB Configuration
 // --------------------------------------------------
-
-const USERS_TABLE =
-  process.env.DYNAMODB_USERS_TABLE || "SWENG861Users";
-
-const AWS_REGION =
-  process.env.AWS_REGION || "us-east-2";
 
 console.log(
   "Configured DynamoDB users table:",
@@ -56,92 +59,68 @@ const dynamoDB =
   DynamoDBDocumentClient.from(dynamoClient);
 
 // --------------------------------------------------
-// Save User to DynamoDB
+// Create or Update Local User
 // --------------------------------------------------
 
-async function saveUserToDatabase(userInfo) {
-  try {
-    const userId =
-      userInfo.sub ||
-      userInfo.username ||
-      userInfo.email;
+async function saveOrUpdateUser(userInfo) {
+  const providerId = userInfo.sub;
 
-    if (!userId) {
-      throw new Error(
-        "Cognito did not return a valid user identifier."
-      );
-    }
-
-    if (!USERS_TABLE) {
-      throw new Error(
-        "DynamoDB table name is missing."
-      );
-    }
-
-    const item = {
-      userId: String(userId),
-
-      email:
-        userInfo.email || "",
-
-      username:
-        userInfo.preferred_username ||
-        userInfo.username ||
-        userInfo.email ||
-        "",
-
-      createdAt:
-        new Date().toISOString(),
-    };
-
-    console.log(
-      "Attempting to save user to DynamoDB..."
+  if (!providerId) {
+    throw new Error(
+      "Cognito did not return a stable provider identifier."
     );
+  }
 
-    console.log(
-      "TABLE NAME SENT:",
-      USERS_TABLE
-    );
+  const userId = providerId;
+  const now = new Date().toISOString();
 
-    console.log(
-      "AWS REGION SENT:",
-      AWS_REGION
-    );
+  const email =
+    userInfo.email || "";
 
-    console.log(
-      "ITEM SENT:",
-      item
-    );
+  const username =
+    userInfo.preferred_username ||
+    userInfo.username ||
+    email ||
+    "";
 
-    const command = new PutCommand({
-      TableName: USERS_TABLE,
-      Item: item,
-    });
+  const command = new UpdateCommand({
+    TableName: USERS_TABLE,
 
+    Key: {
+      userId,
+    },
+
+    UpdateExpression: `
+      SET
+        providerId = :providerId,
+        email = :email,
+        username = :username,
+        createdAt = if_not_exists(createdAt, :createdAt),
+        updatedAt = :updatedAt,
+        lastLoginAt = :lastLoginAt
+    `,
+
+    ExpressionAttributeValues: {
+      ":providerId": providerId,
+      ":email": email,
+      ":username": username,
+      ":createdAt": now,
+      ":updatedAt": now,
+      ":lastLoginAt": now,
+    },
+
+    ReturnValues: "ALL_NEW",
+  });
+
+  const result =
     await dynamoDB.send(command);
 
-    console.log(
-      "SUCCESS - User saved to DynamoDB:",
-      userInfo.email
-    );
-  } catch (error) {
-    console.error(
-      "DynamoDB ERROR NAME:",
-      error.name
-    );
+  console.log(
+    "SUCCESS - Local user record saved/updated:",
+    result.Attributes
+  );
 
-    console.error(
-      "DynamoDB ERROR MESSAGE:",
-      error.message
-    );
-
-    console.error(
-      "DynamoDB ERROR TYPE:",
-      error.__type
-    );
-
-    throw error;
-  }
+  return result.Attributes;
 }
 
 // --------------------------------------------------
@@ -179,30 +158,91 @@ async function initializeClient() {
 initializeClient().catch((error) => {
   console.error(
     "OpenID initialization error:",
-    error
+    error.message
   );
 });
 
 // --------------------------------------------------
-// Authentication Middleware
+// Reusable Authentication Middleware
 // --------------------------------------------------
 
-const checkAuth = (
-  req,
-  res,
-  next
-) => {
-  if (!req.session.userInfo) {
-    req.isAuthenticated = false;
-  } else {
-    req.isAuthenticated = true;
+async function requireAuth(req, res, next) {
+  try {
+    let userInfo = null;
+
+    const authHeader =
+      req.headers.authorization;
+
+    // Bearer token path for Postman/API clients
+    if (
+      authHeader &&
+      authHeader.startsWith("Bearer ")
+    ) {
+      if (!client) {
+        return res.status(503).json({
+          error: "ServiceUnavailable",
+          message:
+            "Authentication service is initializing",
+        });
+      }
+
+      const accessToken =
+        authHeader.substring(7);
+
+      userInfo =
+        await client.userinfo(
+          accessToken
+        );
+    }
+
+    // Browser session path
+    else if (
+      req.session &&
+      req.session.userInfo
+    ) {
+      userInfo =
+        req.session.userInfo;
+    }
+
+    if (!userInfo) {
+      return res.status(401).json({
+        error: "Unauthorized",
+        message:
+          "Valid authentication is required",
+      });
+    }
+
+    req.user = {
+      userId:
+        userInfo.sub,
+
+      email:
+        userInfo.email || null,
+
+      username:
+        userInfo.preferred_username ||
+        userInfo.username ||
+        userInfo.email ||
+        null,
+    };
+
+    next();
+  } catch (error) {
+    console.error(
+      "Authentication middleware error:",
+      error.message
+    );
+
+    return res.status(401).json({
+      error: "Unauthorized",
+      message:
+        "Valid access token is required",
+    });
   }
-
-  next();
-};
+}
 
 // --------------------------------------------------
-// Week 1 Public Health Endpoint
+// Week 1 Health Endpoint
 // --------------------------------------------------
 
 app.get("/health", (req, res) => {
@@ -230,8 +270,11 @@ app.get("/login", (req, res) => {
   const state =
     generators.state();
 
-  req.session.nonce = nonce;
-  req.session.state = state;
+  req.session.nonce =
+    nonce;
+
+  req.session.state =
+    state;
 
   const authUrl =
     client.authorizationUrl({
@@ -248,9 +291,9 @@ app.get("/login", (req, res) => {
 // --------------------------------------------------
 
 app.get("/", async (req, res) => {
-  // If Cognito did not return an authorization code,
-  // show authenticated state or login link.
+  // Normal home request
   if (!req.query.code) {
+
     if (req.session.userInfo) {
       return res
         .status(200)
@@ -259,17 +302,8 @@ app.get("/", async (req, res) => {
             "User is authenticated",
 
           user: {
-            username:
-              req.session.userInfo
-                .preferred_username ||
-              req.session.userInfo
-                .username ||
-              req.session.userInfo
-                .email,
-
             email:
-              req.session.userInfo
-                .email,
+              req.session.userInfo.email,
           },
         });
     }
@@ -285,7 +319,7 @@ app.get("/", async (req, res) => {
     `);
   }
 
-  // Cognito returned an authorization code
+  // Cognito callback
   try {
     const params =
       client.callbackParams(req);
@@ -293,9 +327,7 @@ app.get("/", async (req, res) => {
     const tokenSet =
       await client.callback(
         process.env.COGNITO_CALLBACK_URL,
-
         params,
-
         {
           nonce:
             req.session.nonce,
@@ -315,7 +347,6 @@ app.get("/", async (req, res) => {
       userInfo.email
     );
 
-    // Save authenticated session first
     req.session.userInfo =
       userInfo;
 
@@ -325,15 +356,13 @@ app.get("/", async (req, res) => {
     req.session.idToken =
       tokenSet.id_token;
 
-    // Try DynamoDB separately so DB failure
-    // does not break successful authentication.
     try {
-      await saveUserToDatabase(
+      await saveOrUpdateUser(
         userInfo
       );
     } catch (dbError) {
       console.error(
-        "User authenticated successfully, but DynamoDB save failed:",
+        "Authentication succeeded, but user persistence failed:",
         dbError.message
       );
     }
@@ -342,7 +371,7 @@ app.get("/", async (req, res) => {
   } catch (error) {
     console.error(
       "Authentication callback error:",
-      error
+      error.message
     );
 
     return res
@@ -359,6 +388,7 @@ app.get("/", async (req, res) => {
 
 app.get("/logout", (req, res) => {
   req.session.destroy(() => {
+
     const logoutUrl =
       `${process.env.COGNITO_DOMAIN}/logout` +
       `?client_id=${process.env.COGNITO_CLIENT_ID}` +
@@ -370,41 +400,25 @@ app.get("/logout", (req, res) => {
   });
 });
 
+
 // --------------------------------------------------
 // Week 2 Protected Endpoint
 // --------------------------------------------------
 
 app.get(
   "/api/hello",
-  checkAuth,
+  requireAuth,
   (req, res) => {
-    if (!req.isAuthenticated) {
-      return res
-        .status(401)
-        .json({
-          message: "Unauthorized",
-        });
-    }
+
+    const email =
+      req.user.email ||
+      "authenticated user";
 
     return res
       .status(200)
       .json({
         message:
-          "Hello, authenticated user!",
-
-        user: {
-          username:
-            req.session.userInfo
-              .preferred_username ||
-            req.session.userInfo
-              .username ||
-            req.session.userInfo
-              .email,
-
-          email:
-            req.session.userInfo
-              .email,
-        },
+          `Hello, ${email}!`,
       });
   }
 );
