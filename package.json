@@ -1,5 +1,11 @@
 {
   "dependencies": {
-    "express": "^5.2.1"
+    "@aws-sdk/client-dynamodb": "^3.1127.0",
+    "@aws-sdk/lib-dynamodb": "^3.1127.0",
+    "dotenv": "^17.4.2",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "openid-client": "^5.7.0"
   }
 }
