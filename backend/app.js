@@ -1,7 +1,9 @@
 require("dotenv").config({ path: __dirname + "/.env" });
 
+
 const axios = require("axios");
 const express = require("express");
+const cors = require("cors");
 const session = require("express-session");
 const crypto = require("crypto");
 const EventEmitter = require("events");
@@ -37,6 +39,13 @@ const AWS_REGION =
 // --------------------------------------------------
 
 app.use(express.json());
+
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  })
+);
 
 app.use(
   session({
@@ -410,7 +419,7 @@ app.get("/", async (req, res) => {
       );
     }
 
-    res.redirect("/");
+    res.redirect("http://localhost:5173/initiatives");
   } catch (error) {
     console.error(
       "Authentication callback error:",
@@ -440,6 +449,25 @@ app.get("/logout", (req, res) => {
       )}`;
 
     res.redirect(logoutUrl);
+  });
+});
+
+// --------------------------------------------------
+// Current Authenticated User
+// --------------------------------------------------
+
+app.get("/api/me", (req, res) => {
+  if (!req.session.userInfo) {
+    return res.status(401).json({
+      error: "Unauthorized",
+      message: "User is not authenticated",
+    });
+  }
+
+  return res.status(200).json({
+    user: {
+      email: req.session.userInfo.email,
+    },
   });
 });
 
