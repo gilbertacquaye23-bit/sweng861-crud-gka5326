@@ -628,6 +628,32 @@ function NewInitiative() {
   );
 }
 
+function ProtectedRoute({
+  user,
+  authLoading,
+  children,
+}) {
+  if (authLoading) {
+    return (
+      <div className="page">
+        <div className="card">
+          <p>Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+      />
+    );
+  }
+
+  return children;
+}
 
 
 function AppLayout() {
@@ -683,10 +709,54 @@ function AppLayout() {
         <Routes>
           <Route path="/" element={<Navigate to="/initiatives" replace />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/initiatives" element={<Initiatives />} />
-          <Route path="/initiatives/new" element={<NewInitiative />} />
-          <Route path="/initiatives/:id" element={<InitiativeDetail />} />
-          <Route path="/initiatives/:id/edit" element={<EditInitiative />} />
+          <Route
+  path="/initiatives"
+  element={
+    <ProtectedRoute
+      user={user}
+      authLoading={authLoading}
+    >
+      <Initiatives />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/initiatives/new"
+  element={
+    <ProtectedRoute
+      user={user}
+      authLoading={authLoading}
+    >
+      <NewInitiative />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/initiatives/:id"
+  element={
+    <ProtectedRoute
+      user={user}
+      authLoading={authLoading}
+    >
+      <InitiativeDetail />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/initiatives/:id/edit"
+  element={
+    <ProtectedRoute
+      user={user}
+      authLoading={authLoading}
+    >
+      <EditInitiative />
+    </ProtectedRoute>
+  }
+/>
+
         </Routes>
       </main>
     </div>

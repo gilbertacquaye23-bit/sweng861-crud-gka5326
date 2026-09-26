@@ -68,3 +68,38 @@ Example response:
 {
   "status": "ok"
 }
+
+
+## Automated Testing
+
+The project includes automated backend and frontend test suites covering unit, integration, UI, authentication, authorization, validation, loading, and error scenarios.
+
+### Backend Tests
+
+From the project root, run:
+
+```bash
+npm test
+Generate the backend coverage report with:
+npm run test:coverage
+The backend test suite uses Jest and Supertest. DynamoDB operations are mocked during automated tests, so the tests do not modify production data.
+The HTML coverage report is generated in:
+coverage/index.html
+Frontend Tests
+From the project root, run:
+cd frontend
+npm test
+Generate the frontend coverage report with:
+npm run test:coverage
+The frontend test suite uses Vitest, React Testing Library, and jsdom.
+The HTML coverage report is generated in:
+frontend/coverage/index.html
+Production Build Verification
+From the frontend directory, run:
+npm run build
+Test Summary
+Backend: 22 automated tests
+Frontend: 17 automated tests
+Backend core service line coverage: 100%
+Frontend overall line coverage: 80.79%
+Security scenarios include unauthenticated 401, authenticated owner 200, cross-user 403, missing record 404, and protected-route redirection.

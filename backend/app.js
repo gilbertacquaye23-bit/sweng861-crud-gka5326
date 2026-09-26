@@ -6,6 +6,18 @@ const express = require("express");
 const cors = require("cors");
 const session = require("express-session");
 const crypto = require("crypto");
+
+// --------------------------------------------------
+// ADDED FOR TESTING
+// --------------------------------------------------
+const {
+  validateInsightInput,
+  buildInsight,
+} = require("./utils/insightUtils");
+// --------------------------------------------------
+// --------------------------------------------------
+
+
 const EventEmitter = require("events");
 const { Issuer, generators } = require("openid-client");
 
@@ -90,6 +102,12 @@ const dynamoClient = new DynamoDBClient({
 
 const dynamoDB =
   DynamoDBDocumentClient.from(dynamoClient);
+
+  //Added for Testing
+  // Expose the client so automated tests can mock send()
+// without connecting to the real DynamoDB tables.
+app.locals.dynamoDB = dynamoDB;
+// End of Testing block
 
 // --------------------------------------------------
 // Create or Update Local User
@@ -188,12 +206,28 @@ async function initializeClient() {
   );
 }
 
-initializeClient().catch((error) => {
-  console.error(
-    "OpenID initialization error:",
-    error.message
-  );
-});
+// Cognito discovery requires a network request.
+// Skip it during Jest tests so the test process closes cleanly.
+if (process.env.NODE_ENV !== "test") {
+  initializeClient().catch((error) => {
+    console.error(
+      "OpenID initialization error:",
+      error.message
+    );
+  });
+}
+///////////Cognito discovery requires ENDS HERE///////
+
+
+// Cpmmented for Testing. Replaced with block above
+//--------------------------------------------------
+// Initialize OpenID client on server startup
+//initializeClient().catch((error) => {
+//  console.error(
+//    "OpenID initialization error:",
+//    error.message
+//  );
+//});
 
 // --------------------------------------------------
 // Reusable Authentication Middleware
@@ -201,6 +235,29 @@ initializeClient().catch((error) => {
 
 async function requireAuth(req, res, next) {
   try {
+
+    //Included for testing purposes.
+    // Automated-test identity.
+    // This block is disabled outside NODE_ENV=test.
+    if (
+      process.env.NODE_ENV === "test" &&
+      req.headers["x-test-user-id"]
+    ) {
+      req.user = {
+        userId: req.headers["x-test-user-id"],
+        email:
+          req.headers["x-test-user-email"] ||
+          "test@example.com",
+        username:
+          req.headers["x-test-username"] ||
+          "test-user",
+      };
+
+      return next();
+    }
+// End of testing block
+
+
     let userInfo = null;
 
     const authHeader =
@@ -504,56 +561,70 @@ app.post(
   requireAuth,
   async (req, res) => {
     try {
-      const {
-        title,
-        description,
-        category,
-        status,
-      } = req.body;
+      //Commented for Testing. Replaced with block below
+      // const {
+      //   title,
+      //   description,
+      //   category,
+      //   status,
+      // } = req.body;
 
-      // Basic validation
-      if (
-        !title ||
-        !description ||
-        !category
-      ) {
+      // // Basic validation
+      // if (
+      //   !title ||
+      //   !description ||
+      //   !category
+      // ) {
+      //   return res.status(400).json({
+      //     error: "BadRequest",
+      //     message:
+      //       "title, description, and category are required",
+      //   });
+      // }
+
+      // const now =
+      //   new Date().toISOString();
+
+      // const insight = {
+      //   insightId:
+      //     crypto.randomUUID(),
+
+      //   ownerId:
+      //     req.user.userId,
+
+      //   title:
+      //     title.trim(),
+
+      //   description:
+      //     description.trim(),
+
+      //   category:
+      //     category.trim(),
+
+      //   status:
+      //     status
+      //       ? status.trim()
+      //       : "Open",
+
+      //   createdAt:
+      //     now,
+
+      //   updatedAt:
+      //     now,
+      // };
+// --------------------------------------------------
+// ADDED FOR TESTING
+      const validation =
+      validateInsightInput(req.body);
+      if (!validation.isValid) {
         return res.status(400).json({
           error: "BadRequest",
-          message:
-            "title, description, and category are required",
-        });
-      }
-
-      const now =
-        new Date().toISOString();
-
-      const insight = {
-        insightId:
-          crypto.randomUUID(),
-
-        ownerId:
-          req.user.userId,
-
-        title:
-          title.trim(),
-
-        description:
-          description.trim(),
-
-        category:
-          category.trim(),
-
-        status:
-          status
-            ? status.trim()
-            : "Open",
-
-        createdAt:
-          now,
-
-        updatedAt:
-          now,
-      };
+          message: validation.message,});}
+      const insight = buildInsight(
+        req.body,
+        req.user.userId
+      );
+// Tester Ends Here ----------------------------------------
 
       const command =
         new PutCommand({
@@ -584,7 +655,7 @@ app.post(
           insight.insightId,
           ownerId:
           insight.ownerId,
-          
+
           occurredAt:
           new Date().toISOString(),
         }
@@ -1056,11 +1127,30 @@ app.get(
 
 
 // --------------------------------------------------
-// Start Server
+// Start Server Commented Out for Testing
+// --------------------------------------------------
+// The following code is commented out to allow Jest and Supertest to run tests without starting the server.
+// Uncomment the following lines to run the server normally.
 // --------------------------------------------------
 
+//app.listen(PORT, () => {
+//  console.log(
+//    `Server running at http://localhost:${PORT}`
+//  );
+//});
+
+
+// --------------------------------------------------
+// Start Server ** Tester
+// --------------------------------------------------
+// Start the server only when app.js is run directly.
+// Jest and Supertest can import the app without opening port 3000.
+if (require.main === module) {
 app.listen(PORT, () => {
-  console.log(
-    `Server running at http://localhost:${PORT}`
-  );
+console.log(`Server running at http://localhost:${PORT}`);
 });
+}
+// Export the Express app for automated testing.
+module.exports = app;
+
+/// Test ends here -----------------------------------
