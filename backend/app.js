@@ -49,7 +49,25 @@ const TREASURY_TABLE =
 const AWS_REGION =
   process.env.AWS_REGION || "us-east-2";
 
+function logEvent(level, event, requestId) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level,
+    event,
+  };
 
+  if (requestId) {
+    entry.requestId = requestId;
+  }
+
+  const output = JSON.stringify(entry);
+
+  if (level === "error") {
+    console.error(output);
+  } else {
+    console.log(output);
+  }
+}
 
 // --------------------------------------------------
 // Middleware
@@ -83,25 +101,14 @@ app.use(
 // DynamoDB Configuration
 // --------------------------------------------------
 
-console.log(
-  "Configured DynamoDB users table:",
-  USERS_TABLE
-);
+logEvent("info", "users_table_configured");
 
-console.log(
-  "Configured financial insights table:",
-  INSIGHTS_TABLE
-);
+logEvent("info", "insights_table_configured");
 
-console.log(
-  "Configured treasury data table:",
-  TREASURY_TABLE
-);
+logEvent("info", "treasury_table_configured");
 
-console.log(
-  "Configured AWS region:",
-  AWS_REGION
-);
+logEvent("info", "aws_region_configured");
+
 
 const dynamoClient = new DynamoDBClient({
   region: AWS_REGION,
@@ -173,10 +180,7 @@ async function saveOrUpdateUser(userInfo) {
   const result =
     await dynamoDB.send(command);
 
-  console.log(
-    "SUCCESS - Local user record saved/updated:",
-    result.Attributes
-  );
+  logEvent("info", "user_record_saved");
 
   return result.Attributes;
 }
@@ -208,19 +212,14 @@ async function initializeClient() {
     response_types: ["code"],
   });
 
-  console.log(
-    "OpenID client initialized"
-  );
+  logEvent("info", "openid_client_initialized");
 }
 
 // Cognito discovery requires a network request.
 // Skip it during Jest tests so the test process closes cleanly.
 if (process.env.NODE_ENV !== "test") {
   initializeClient().catch((error) => {
-    console.error(
-      "OpenID initialization error:",
-      error.message
-    );
+    logEvent("error", "openid_initialization_failed");
   });
 }
 ///////////Cognito discovery requires ENDS HERE///////
@@ -325,10 +324,7 @@ async function requireAuth(req, res, next) {
 
     next();
   } catch (error) {
-    console.error(
-      "Authentication middleware error:",
-      error.message
-    );
+    logEvent("error", "authentication_middleware_failed", req.id);
 
     return res.status(401).json({
       error: "Unauthorized",
@@ -357,10 +353,7 @@ domainEvents.on(
   "insight.created",
   (eventData) => {
     setImmediate(() => {
-      console.log(
-        "DOMAIN EVENT - insight.created:",
-        eventData
-      );
+      logEvent("info", "insight_created_domain_event");
     });
   }
 );
@@ -458,10 +451,7 @@ app.get("/", async (req, res) => {
         tokenSet.access_token
       );
 
-    console.log(
-      "Authenticated Cognito user:",
-      userInfo.email
-    );
+    logEvent("info", "login_succeeded", req.requestId);
 
     req.session.userInfo =
       userInfo;
@@ -477,18 +467,12 @@ app.get("/", async (req, res) => {
         userInfo
       );
     } catch (dbError) {
-      console.error(
-        "Authentication succeeded, but user persistence failed:",
-        dbError.message
-      );
+      logEvent("error", "user_persistence_failed", req.requestId);
     }
 
     res.redirect("http://localhost:5173/initiatives");
   } catch (error) {
-    console.error(
-      "Authentication callback error:",
-      error.message
-    );
+    logEvent("error", "authentication_callback_failed", req.requestId);
 
     return res
       .status(500)
@@ -649,10 +633,7 @@ app.post(
         command
       );
 
-      console.log(
-        "Financial insight created:",
-        insight
-      );
+      logEvent("info", "insight_created", req.requestId);
 
 
       domainEvents.emit(
@@ -678,10 +659,7 @@ app.post(
             insight,
         });
     } catch (error) {
-      console.error(
-        "Create insight error:",
-        error
-      );
+      logEvent("error", "insight_create_failed", req.requestId);
 
       return res
         .status(500)
@@ -736,10 +714,7 @@ app.get(
             result.Items || [],
         });
     } catch (error) {
-      console.error(
-        "Get insights error:",
-        error
-      );
+      logEvent("error", "insight_list_failed", req.requestId);
 
       return res
         .status(500)
@@ -799,10 +774,7 @@ app.get(
         data: result.Item,
       });
     } catch (error) {
-      console.error(
-        "Get insight by ID error:",
-        error
-      );
+      logEvent("error", "insight_read_failed", req.requestId);
 
       return res.status(500).json({
         error:
@@ -910,10 +882,7 @@ app.put(
           result.Attributes,
       });
     } catch (error) {
-      console.error(
-        "Update insight error:",
-        error
-      );
+      logEvent("error", "insight_update_failed", req.requestId);
 
       return res.status(500).json({
         error: "InternalServerError",
@@ -979,10 +948,7 @@ app.delete(
           "Financial insight deleted successfully",
       });
     } catch (error) {
-      console.error(
-        "Delete insight error:",
-        error
-      );
+      logEvent("error", "insight_delete_failed", req.requestId);
 
       return res.status(500).json({
         error: "InternalServerError",
@@ -1102,10 +1068,7 @@ app.get(
         saveCommand
       );
 
-      console.log(
-        "Treasury data saved:",
-        externalDataRecord
-      );
+      logEvent("info", "treasury_data_saved", req.requestId);
 
       // Return success response
       return res.status(200).json({
@@ -1116,10 +1079,7 @@ app.get(
           externalDataRecord,
       });
     } catch (error) {
-      console.error(
-        "Treasury API / persistence error:",
-        error
-      );
+      logEvent("error", "treasury_import_failed", req.requestId);
 
       return res.status(500).json({
         error:
@@ -1141,9 +1101,7 @@ app.get(
 // --------------------------------------------------
 
 //app.listen(PORT, () => {
-//  console.log(
-//    `Server running at http://localhost:${PORT}`
-//  );
+//  logEvent("info", "server_started");
 //});
 
 
@@ -1154,7 +1112,7 @@ app.get(
 // Jest and Supertest can import the app without opening port 3000.
 if (require.main === module) {
 app.listen(PORT, () => {
-console.log(`Server running at http://localhost:${PORT}`);
+logEvent("info", "server_started");
 });
 }
 // Export the Express app for automated testing.
