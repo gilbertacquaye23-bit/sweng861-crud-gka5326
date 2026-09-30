@@ -16,7 +16,10 @@ const {
 } = require("./utils/insightUtils");
 // --------------------------------------------------
 // --------------------------------------------------
-
+const {
+  requestLogger,
+  metricsHandler,
+} = require("./observability");
 
 const EventEmitter = require("events");
 const { Issuer, generators } = require("openid-client");
@@ -46,10 +49,14 @@ const TREASURY_TABLE =
 const AWS_REGION =
   process.env.AWS_REGION || "us-east-2";
 
+
+
 // --------------------------------------------------
 // Middleware
 // --------------------------------------------------
 
+app.use(requestLogger);
+app.get("/metrics", metricsHandler);
 app.use(express.json());
 
 app.use(
